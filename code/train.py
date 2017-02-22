@@ -3,6 +3,15 @@
 
 This script trains the model using augmented PASCAL VOC,
 which contains approximately 10000 images for training and 1500 images for validation.
+
+
+### 2017-02-21: steps to change deep_resnet to deep interactive segmentation
+  -- step 1: create new image_reader.py, it should support read tiff file.
+             update train.py, the new input interface depends on placeholder.
+
+  -- step 2: create new model with input channel = 5, output channel = ???, and load pretrained model
+
+  -- step 3: update inference.py, to implement inference over new model.
 """
 
 from __future__ import print_function
@@ -18,7 +27,7 @@ from cfg.config import cfg
 import tensorflow as tf
 import numpy as np
 
-from deeplab_resnet import DeepLabResNetModel, ImageReader, decode_labels, inv_preprocess, prepare_label
+from deeplab_resnet import DeepLabResNetModel, image_reader, decode_labels, inv_preprocess, prepare_label
 
 n_classes = 21
 
@@ -108,13 +117,10 @@ def main():
     """Create the model and start the training."""
     args = get_arguments()
 
+    # Load reader.
+    '''
     h, w = map(int, args.input_size.split(','))
     input_size = (h, w)
-
-    # Create queue coordinator.
-    coord = tf.train.Coordinator()
-
-    # Load reader.
     with tf.name_scope("create_inputs"):
         reader = ImageReader(
             args.data_dir,
@@ -123,6 +129,9 @@ def main():
             args.random_scale,
             coord)
         image_batch, label_batch = reader.dequeue(args.batch_size)
+    '''
+    image_batch = tf.placeholder(tf.float32, shape=[None, INPUT_SIZE, 5], name='input_images')
+    label_batch = tf.placeholder(tf.float32, shape=[None, INPUT_SIZE, 1], name='label_images')
 
     # Create network.
     net = DeepLabResNetModel({'data': image_batch}, is_training=args.is_training)
@@ -215,12 +224,35 @@ def main():
         load(loader, sess, args.restore_from)
 
     # Start queue threads.
+    coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(coord=coord, sess=sess)
 
+    '''
     # Iterate over training steps.
     for step in range(args.num_steps):
         start_time = time.time()
         feed_dict = { step_ph : step }
+
+        if step % args.save_pred_every == 0:
+            loss_value, images, labels, preds, summary, _ = sess.run([reduced_loss, image_batch, label_batch, pred, total_summary, train_op], feed_dict=feed_dict)
+            summary_writer.add_summary(summary, step)
+            save(saver, sess, args.snapshot_dir, step)
+        else:
+            loss_value, _ = sess.run([reduced_loss, train_op], feed_dict=feed_dict)
+        duration = time.time() - start_time
+        print('step {:d} \t loss = {:.3f}, ({:.3f} sec/step)'.format(step, loss_value, duration))
+    coord.request_stop()
+    coord.join(threads)
+    '''
+    h, w = map(int, args.input_size.split(','))
+    reader_option = {"resize":True, "resize_size":[h,w]}
+    train_dataset_reader = image_reader.BatchDataset(args.data_dir, args.data_list, reader_option) # paramete
+
+    for step in xrange(args.num_steps):
+        start_time = time.time()
+        images, labels = train_dataset_reader.next_batch(args.batch_size)
+        feed_dict = {image_batch:images[:,:,:,:3], label_batch:labels, step_ph:step}
+
 
         if step % args.save_pred_every == 0:
             loss_value, images, labels, preds, summary, _ = sess.run([reduced_loss, image_batch, label_batch, pred, total_summary, train_op], feed_dict=feed_dict)
