@@ -23,23 +23,23 @@ import os.path as osp
 import sys
 import time
 from cfg.config import cfg
-
+import pdb
 import tensorflow as tf
 import numpy as np
 
 from deeplab_resnet import DeepLabResNetModel, image_reader, decode_labels, inv_preprocess, prepare_label
 
-n_classes = 21
+n_classes = 1
 
 BATCH_SIZE = 10
-DATA_DIRECTORY = '/home/VOCdevkit'
+DATA_DIRECTORY = ''
 DATA_LIST_PATH = osp.join(cfg.DATA_DIR, 'PASCAL', 'converted', 'train.txt')
 INPUT_SIZE = '321,321'
 LEARNING_RATE = 2.5e-4
 MOMENTUM = 0.9
 NUM_STEPS = 20001
 POWER = 0.9
-RESTORE_FROM = './models/deeplab_resnet.ckpt'
+RESTORE_FROM = '../models/deeplab_resnet.ckpt'
 SAVE_NUM_IMAGES = 2
 SAVE_PRED_EVERY = 1000
 SNAPSHOT_DIR = osp.join(cfg.ROOT_DIR, 'snapshot')
@@ -118,8 +118,9 @@ def main():
     args = get_arguments()
 
     # Load reader.
-    '''
+
     h, w = map(int, args.input_size.split(','))
+    '''
     input_size = (h, w)
     with tf.name_scope("create_inputs"):
         reader = ImageReader(
@@ -130,8 +131,8 @@ def main():
             coord)
         image_batch, label_batch = reader.dequeue(args.batch_size)
     '''
-    image_batch = tf.placeholder(tf.float32, shape=[None, INPUT_SIZE, 5], name='input_images')
-    label_batch = tf.placeholder(tf.float32, shape=[None, INPUT_SIZE, 1], name='label_images')
+    image_batch = tf.placeholder(tf.float32, shape=[args.batch_size, h, w, 5], name='input_images')
+    label_batch = tf.placeholder(tf.uint8, shape=[args.batch_size, h, w, 1], name='label_images')
 
     # Create network.
     net = DeepLabResNetModel({'data': image_batch}, is_training=args.is_training)
@@ -154,7 +155,6 @@ def main():
     fc_b_trainable = [v for v in fc_trainable if 'biases' in v.name] # lr * 20.0
     assert(len(all_trainable) == len(fc_trainable) + len(conv_trainable))
     assert(len(fc_trainable) == len(fc_w_trainable) + len(fc_b_trainable))
-
 
     # Predictions: ignoring all predictions with labels greater or equal than n_classes
     raw_prediction = tf.reshape(raw_output, [-1, n_classes])
@@ -180,8 +180,9 @@ def main():
     labels_summary = tf.py_func(decode_labels, [label_batch, args.save_num_images], tf.uint8)
     preds_summary = tf.py_func(decode_labels, [pred, args.save_num_images], tf.uint8)
 
+
     total_summary = tf.summary.image('images',
-                                     tf.concat(2, [images_summary, labels_summary, preds_summary]),
+                                     tf.concat([images_summary, labels_summary, preds_summary], axis=2),
                                      max_outputs=args.save_num_images) # Concatenate row-wise.
     summary_writer = tf.summary.FileWriter(args.snapshot_dir)
 
@@ -216,14 +217,16 @@ def main():
 
     # Saver for storing checkpoints of the model.
     saver = tf.train.Saver(var_list=restore_var, max_to_keep=10)
-
+    load_var_list = [v for v in restore_var if ('conv1' not in v.name) and ('fc1_voc12' not in v.name)]
+    #load_name = [v.name for v in load_var_list]
+    #print("---load var name: {}".format(load_name))
     # Load variables if the checkpoint is provided.
     # restore_var_minus = [v for v in restore_var if 'cov1' not in v.name]
     if args.restore_from is not None:
-        loader = tf.train.Saver(var_list=restore_var)
+        loader = tf.train.Saver(var_list=load_var_list)
         load(loader, sess, args.restore_from)
 
-    # Start queue threads.
+    ## Start queue threads.
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(coord=coord, sess=sess)
 
@@ -244,15 +247,13 @@ def main():
     coord.request_stop()
     coord.join(threads)
     '''
-    h, w = map(int, args.input_size.split(','))
     reader_option = {"resize":True, "resize_size":[h,w]}
     train_dataset_reader = image_reader.BatchDataset(args.data_dir, args.data_list, reader_option) # paramete
 
-    for step in xrange(args.num_steps):
+    for step in range(args.num_steps):
         start_time = time.time()
         images, labels = train_dataset_reader.next_batch(args.batch_size)
-        feed_dict = {image_batch:images[:,:,:,:3], label_batch:labels, step_ph:step}
-
+        feed_dict = {image_batch:images, label_batch:labels, step_ph:step}
 
         if step % args.save_pred_every == 0:
             loss_value, images, labels, preds, summary, _ = sess.run([reduced_loss, image_batch, label_batch, pred, total_summary, train_op], feed_dict=feed_dict)

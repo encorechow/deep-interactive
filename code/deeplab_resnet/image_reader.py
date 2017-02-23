@@ -1,7 +1,6 @@
 import numpy as np
-import scipy.misc as misc
 from tifffile import imread as tiff_imread
-
+import cv2
 '''
 Class BatchDataset used to read data batch by batch. the output is a ndarray with
 (batch_size, ht, wd, ch)
@@ -38,7 +37,7 @@ class BatchDataset:
 
         self.parse_data_list()
         self.image_num = len(self.image_list)
-        self.batch_perm = np.arrange(self.image_num)
+        self.batch_perm = np.arange(self.image_num)
 
     def parse_data_list(self):
         f = open(self.data_txt,'r')
@@ -53,37 +52,43 @@ class BatchDataset:
     def read_batch_images_from_disk(self, file_list, flipH=False):
         images = np.array([self.transform(self.image_list[k], flipH, 'tiff') for k in file_list])
         labels = np.array([self.transform(self.label_list[k], flipH) for k in file_list])
-
+        labels = labels[..., np.newaxis]
         return images, labels
 
 
     # read data, and if necessary, do resize and flipH
-    def transform(self, file_name, flipH=False, type='tiff'):
-        if type=='tiff':
+    def transform(self, file_name, flipH=False, file_type=None):
+        if file_type=='tiff':
             image = tiff_imread(file_name)
+            image = np.transpose(image, [1, 2, 0])
+            #print("image before resize: {}".format(image.shape))
         else:
-            image = misc.imread(file_name)
-        in_ht, in_wd, in_ch = image.shape
+            image = cv2.imread(file_name, 0)
+            #print("label before resize: {}".format(image.shape))
 
         # resize if needed
         if self.image_options.get("resize", False) and self.image_options["resize_size"]:
             ht, wd = self.image_options["resize_size"]
 
-            if in_ch > 3:
-                resize_part1 = misc.imresize(image[:,:,:3], [ht, wd], interp='bilinear')
-                resize_part2 = misc.imresize(image[:,:,3:], [ht, wd], interp='nearest')
+            #if in_ch > 3:
+            #    resize_part1 = misc.imresize(image[:,:,:3], [ht, wd], interp='bilinear')
+            #    resize_part2 = misc.imresize(image[:,:,3:], [ht, wd], interp='nearest')
 
-                resize_image = np.concatenate((resize_part1, resize_part2), axis=2)
-            else:
-                resize_image = misc.imresize(image)
+            #    resize_image = np.concatenate((resize_part1, resize_part2), axis=2)
+            #else:
+            #    resize_image = misc.imresize(image)
+
+            interp = cv2.INTER_LINEAR if len(image.shape) > 2 else cv2.INTER_NEAREST
+            resized_image = cv2.resize(image, (ht, wd), interpolation=interp)
+            #print("After resize: {}".format(resized_image.shape))
         else:
-            resize_image = image
+            resized_image = image
 
         # do Horizontal flip for data augmentation
         if flipH:
-            flip_image = np.fliplr(resize_image)
+            flip_image = np.fliplr(resized_image)
         else:
-            flip_image = resize_image
+            flip_image = resized_image
 
         return np.asarray(flip_image)
 
